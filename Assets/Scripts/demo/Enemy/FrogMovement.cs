@@ -2,87 +2,77 @@
 using System.Collections;
 
 [RequireComponent(typeof(Rigidbody2D))]
-public class EnemyVertical : MonoBehaviour
+public class FrogMovement : MonoBehaviour
 {
+    [SerializeField] private bool muteJumpSound = false;
+
     [Header("Jump Settings")]
-    [SerializeField] private float jumpForce = 8f;      // Lực nhảy lên
-    [SerializeField] private float pauseAtBottom = 1f;  // Thời gian dừng khi chạm đất
-    [SerializeField] private float horizontalForce = 3f; // Lực nhảy ngang
+    [SerializeField] private float jumpForce = 8f;
+    [SerializeField] private float pauseAtBottom = 1f;
+    [SerializeField] private float horizontalForce = 3f;
 
     [Header("Ground Check")]
-    [SerializeField] private Transform groundCheck;     // Điểm kiểm tra chạm đất
-    [SerializeField] private float groundRadius = 0.2f; // Bán kính kiểm tra
-    [SerializeField] private LayerMask groundLayer;     // Layer mặt đất
+    [SerializeField] private Transform groundCheck;
+    [SerializeField] private float groundRadius = 0.2f;
+    [SerializeField] private LayerMask groundLayer;
 
     [Header("Animation")]
-    [SerializeField] private Animator animator;         // Animator cho cóc
+    [SerializeField] private Animator animator;
 
     [Header("Sound - Frog Jump")]
-    [SerializeField] private AudioClip frogJumpClip;    // Clip nhảy của ếch (gán trong Inspector)
+    [SerializeField] private AudioClip frogJumpClip;
 
     private Rigidbody2D rb;
     private bool isGrounded;
+    private bool wasGrounded;
     private bool isWaiting;
-    private EnemySoundController soundController; // dùng để tắt loop và tái dụng AudioSource
-    private AudioSource jumpAudioSource; // nguồn phát jump one-shot
+
+    private EnemySoundController soundController;
+    private AudioSource jumpAudioSource;
 
     private void Awake()
     {
         rb = GetComponent<Rigidbody2D>();
-        rb.gravityScale = 4.5f; // điều chỉnh cho cảm giác nhảy thật
+        rb.gravityScale = 4.5f;
+
         soundController = GetComponent<EnemySoundController>();
         if (soundController != null)
         {
-            // tắt phát liên tục cho ếch, chỉ phát khi nhảy
             var scType = typeof(EnemySoundController);
-            var field = scType.GetField("continuousLoop", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var field = scType.GetField("continuousLoop",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             if (field != null)
-            {
                 field.SetValue(soundController, false);
-            }
         }
-        // chuẩn bị AudioSource để phát jump
+
         jumpAudioSource = GetComponent<AudioSource>();
         if (jumpAudioSource == null)
-        {
             jumpAudioSource = gameObject.AddComponent<AudioSource>();
-        }
     }
 
     private void Update()
     {
-        // kiểm tra chạm đất
-        bool wasGrounded = isGrounded;
+        wasGrounded = isGrounded;
         isGrounded = Physics2D.OverlapCircle(groundCheck.position, groundRadius, groundLayer);
 
-        // vừa chạm đất
-        if (isGrounded && !wasGrounded && !isWaiting)
+        // Khi vừa chạm đất
+        if (isGrounded && !wasGrounded)
         {
-            animator.SetBool("isJumping", false);
-            StartCoroutine(JumpRoutine());
+            animator.SetBool("isJumping", false); // trở về Idle
+            if (!isWaiting)
+                StartCoroutine(JumpRoutine());
         }
-
-        // đang ở trên không
-        if (!isGrounded)
-        {
-            animator.SetBool("isJumping", true);
-        }
-        
-        // Âm thanh được điều khiển bởi EnemySoundController component (nếu có)
-        // Không cần làm gì ở đây
     }
 
     private IEnumerator JumpRoutine()
     {
         isWaiting = true;
 
-        // đứng yên 1s khi chạm đất
         yield return new WaitForSeconds(pauseAtBottom);
 
-        // chỉ nhảy khi vẫn đang chạm đất
         if (isGrounded)
         {
-            Jump();
+            Jump(); // animation được bật ngay tại đây
         }
 
         isWaiting = false;
@@ -90,21 +80,24 @@ public class EnemyVertical : MonoBehaviour
 
     private void Jump()
     {
-        // Đảo hướng nhảy mỗi lần (qua lại trái - phải)
+        // bật animation ngay khi bắt đầu nhảy
+        animator.SetBool("isJumping", true);
+
+        // đổi hướng
         transform.localScale = new Vector3(-transform.localScale.x, transform.localScale.y, transform.localScale.z);
 
-        // Nhảy theo cả hướng ngang và dọc
-        Vector2 jumpDirection = new Vector2(transform.localScale.x > 0 ? 1 : -1, 1).normalized;
-        rb.linearVelocity = Vector2.zero; // reset vận tốc cũ để nhảy ổn định
-        rb.AddForce(jumpDirection * new Vector2(horizontalForce, jumpForce), ForceMode2D.Impulse);
+        // reset vận tốc
+        rb.linearVelocity = Vector2.zero;
 
-        animator.SetBool("isJumping", true);
-        // Phát one-shot clip nhảy nếu đã gán
-        if (frogJumpClip != null)
+        // tạo lực nhảy
+        Vector2 jumpDir = new Vector2(transform.localScale.x > 0 ? 1 : -1, 1).normalized;
+        rb.AddForce(new Vector2(jumpDir.x * horizontalForce, jumpDir.y * jumpForce), ForceMode2D.Impulse);
+
+        // phát âm thanh
+        if (!muteJumpSound && frogJumpClip != null)
         {
             if (soundController != null)
             {
-                // ép 3D thuần và khoảng cách 1..3 cho jump
                 var src = GetComponent<AudioSource>();
                 if (src != null)
                 {
@@ -118,7 +111,6 @@ public class EnemyVertical : MonoBehaviour
             else if (SoundManager.Instance != null)
             {
                 SoundManager.Instance.ConfigureEnemy3DSource(jumpAudioSource);
-                // override để đảm bảo 3D thuần và tắt ngoài 3 đơn vị
                 jumpAudioSource.spatialBlend = 1f;
                 jumpAudioSource.minDistance = 1f;
                 jumpAudioSource.maxDistance = 3f;
